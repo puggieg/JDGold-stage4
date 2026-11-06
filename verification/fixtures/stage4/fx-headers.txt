@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+date: Wed, 14 Oct 2026 15:34:33 GMT
+
+HTTP/2 200 
+cache-control: no-cache
+content-length: 223
+content-type: application/javascript; charset=GB18030
+

@@ -1,0 +1,6 @@
+通过：模拟构建 dual
+通过：模拟构建 single
+通过：模拟构建 both-fail
+通过：模拟构建 selftest-fail
+通过：未知参数被拒绝
+模拟流程检查完成；macOS 编译、lipo 和 codesign 仍须实机验证。

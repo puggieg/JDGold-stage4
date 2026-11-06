@@ -1,0 +1,39 @@
+import Foundation
+
+public struct BarkLink: Equatable {
+    public let key: String
+    public let query: String?
+    public let level: String?
+    public let continuousRing: Bool
+    public var maskedKey: String { "••••" + String(key.suffix(4)) }
+}
+public enum BarkLinkError: Error, CustomStringConvertible {
+    case invalidLink, invalidKey, invalidParameters
+    public var description: String {
+        switch self {
+        case .invalidLink: return "请粘贴 https://api.day.app/ 开头的 Bark 链接或单独的 Key。"
+        case .invalidKey: return "Key 只能包含英文字母、数字、下划线和短横线。"
+        case .invalidParameters: return "level 或 call 参数无效或重复，请检查链接。"
+        }
+    }
+}
+public enum BarkLinkParser {
+    public static func parse(_ raw: String) throws -> BarkLink {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var key = text; var query: String?; var items: [URLQueryItem] = []
+        if text.contains("://") {
+            guard let url = URLComponents(string: text), url.scheme == "https", url.host == "api.day.app",
+                  url.port == nil, url.user == nil, url.password == nil, url.fragment == nil,
+                  let first = url.percentEncodedPath.split(separator: "/").first,
+                  let decoded = String(first).removingPercentEncoding else { throw BarkLinkError.invalidLink }
+            key = decoded; query = url.percentEncodedQuery; items = url.queryItems ?? []
+        }
+        guard key.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { throw BarkLinkError.invalidKey }
+        let levels = items.filter { $0.name == "level" }; let calls = items.filter { $0.name == "call" }
+        guard levels.count <= 1, calls.count <= 1 else { throw BarkLinkError.invalidParameters }
+        let level = levels.first?.value
+        if let level = level, !["active", "passive", "timeSensitive", "critical"].contains(level) { throw BarkLinkError.invalidParameters }
+        if let call = calls.first, call.value != "1" { throw BarkLinkError.invalidParameters }
+        return BarkLink(key: key, query: query, level: level, continuousRing: calls.first?.value == "1")
+    }
+}

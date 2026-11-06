@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+JDGold
+JDGold.app/
+JDGold-previous.*/
+.DS_Store
