@@ -13,7 +13,8 @@ actor BarkNotificationService {
               let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
               let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return "推送内容编码失败。" }
         var address = "https://api.day.app/\(encodedKey)/\(encodedTitle)/\(encodedBody)"
-        if let query = query, !query.isEmpty { address += "?\(query)" }
+        // 所有推送（含测试推送）统一归到 Bark 的 Gold Monitor 分组，保留用户原有 level/call 参数。
+        address += "?\(BarkLinkParser.groupedQuery(query))"
         guard let url = URL(string: address) else { return "推送链接无效。" }
         do {
             let (data, response) = try await session.data(from: url)

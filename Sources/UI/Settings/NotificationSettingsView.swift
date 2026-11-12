@@ -39,7 +39,7 @@ import SwiftUI
                     } else if !model.barkInput.isEmpty {
                         Text("链接无法解析，请检查域名、Key 和参数。").font(.caption).foregroundColor(Color(nsColor: .systemRed))
                     }
-                    Text("重要警告（level=critical）：手机已授权时，可突破静音和专注模式。\n持续响铃（call=1）：重复播放铃声约 30 秒；两者可组合使用，实际效果受 Bark 版本及手机权限影响。")
+                    Text("重要警告（level=critical）：手机已授权时，可突破静音和专注模式。\n持续响铃（call=1）：重复播放铃声约 30 秒；两者可组合使用，实际效果受 Bark 版本及手机权限影响。\n本程序发出的所有推送（含测试推送）都会自动归入 Bark 的「Gold Monitor」分组；链接里自带的 group 参数会被覆盖。")
                         .font(.caption).foregroundColor(.secondary)
                     HStack { Button("保存绑定") { model.saveBark() }.disabled(preview == nil || model.barkBusy); Button("解绑") { model.saveBark(unbind: true) }.disabled(model.barkBusy); Spacer(); Text(model.barkStatus).font(.caption).foregroundColor(.secondary) }
                     Divider()

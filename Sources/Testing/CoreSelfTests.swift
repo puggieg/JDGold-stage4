@@ -35,7 +35,7 @@ public enum CoreSelfTests {
          SelfTestCase(name: "JSON损坏保护与整组保存", run: storage),
          SelfTestCase(name: "钥匙串迁移失败保护", run: credentials),
          SelfTestCase(name: "数据源解析和输入校验", run: parsing),
-         SelfTestCase(name: "行情缓存与退避", run: ServiceSelfTests.runBlocking)] + PresentationSelfTests.cases + DecisionFeatureSelfTests.cases
+         SelfTestCase(name: "行情缓存与退避", run: ServiceSelfTests.runBlocking)] + PresentationSelfTests.cases + DecisionFeatureSelfTests.cases + ExtremeAlertSelfTests.cases + AlertTimeStampSelfTests.cases + MenuBankSelfTests.cases
     }
     @discardableResult public static func runAll() -> Int {
         var failed = 0

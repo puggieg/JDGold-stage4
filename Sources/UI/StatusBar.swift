@@ -11,7 +11,7 @@ import Cocoa
     private let source = NSTextField(labelWithString: "")
     private let premiumLabel = NSTextField(labelWithString: "")
     private let sparkline = TodaySparklineView(frame: .zero)
-    private let rangeLabel = NSTextField(wrappingLabelWithString: "")
+    private let range = TodayRangeView(frame: .zero)
     override init(frame: NSRect) {
         super.init(frame: frame)
         name.font = .systemFont(ofSize: 12, weight: .medium)
@@ -27,10 +27,9 @@ import Cocoa
         premiumLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular); premiumLabel.textColor = .secondaryLabelColor
         premiumLabel.frame = NSRect(x: 16, y: 32, width: 352, height: 16); premiumLabel.isHidden = true
         sparkline.frame = NSRect(x: 16, y: 4, width: 168, height: 24)
-        rangeLabel.frame = NSRect(x: 200, y: 4, width: 168, height: 24)
-        rangeLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular); rangeLabel.textColor = .secondaryLabelColor
-        rangeLabel.maximumNumberOfLines = 2; rangeLabel.alignment = .right
-        addSubview(premiumLabel); addSubview(sparkline); addSubview(rangeLabel)
+        // 采集高与采集低各占一行；右侧问号常驻，不依赖点击才出现第二行。
+        range.frame = NSRect(x: 200, y: 2, width: 168, height: 28)
+        addSubview(premiumLabel); addSubview(sparkline); addSubview(range)
         for field in [name,price,movement,minimum,source] { addSubview(field) }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -42,30 +41,99 @@ import Cocoa
         minimum.isHidden = !lowest; source.stringValue = info.sourceDescription(now: now)
         premiumLabel.stringValue = premium?.displayText ?? ""; premiumLabel.isHidden = premium == nil
         premiumLabel.toolTip = TodayHistoryPresentation.premiumTooltip(premium)
-        sparkline.update(samples: samples, delayed: delayed); rangeLabel.stringValue = TodayHistoryPresentation.rangeText(samples)
-        rangeLabel.toolTip = "高低为今日已采集报价的高低值，不包含启动前或缺失时段。"
+        sparkline.update(samples: samples, delayed: delayed)
+        range.update(samples: samples)
         toolTip = source.stringValue + (instrument.group == .domestic ? " · " + TodayHistoryPresentation.premiumTooltip(premium) : "")
         setAccessibilityLabel("\(instrument.displayName)，\(price.stringValue)，\(movement.stringValue)，\(source.stringValue)")
     }
 }
 
+// 链接按钮自己画文字：NSButtonCell 在菜单高亮/焦点态会接管 attributedTitle 的前景色，
+// 把它改成黑色。重写 draw 后颜色只由这里决定，任何状态下都是蓝色；事件处理仍沿用 NSButton。
+@MainActor private final class BlueLinkButton: NSButton {
+    var linkText = "显示其余银行金价"
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        refusesFirstResponder = true
+        setAccessibilityLabel(linkText)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func setLinkText(_ text: String) {
+        linkText = text
+        title = text
+        setAccessibilityLabel(text)
+        needsDisplay = true
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.controlAccentColor
+        ]
+        let text = NSAttributedString(string: linkText, attributes: attributes)
+        let size = text.size()
+        text.draw(at: NSPoint(x: 0, y: max(0, (bounds.height - size.height) / 2)))
+    }
+}
+
+// 默认银行下方的单次展开/收起按钮。点击自定义视图不会让菜单自动关闭。
+@MainActor final class ShowOtherBanksRow: NSView {
+    private let button = BlueLinkButton(frame: .zero)
+    var onToggle: (() -> Void)?
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        button.target = self; button.action = #selector(clicked)
+        button.frame = NSRect(x: 16, y: 2, width: 220, height: 20)
+        addSubview(button)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func clicked() { onToggle?() }
+    func setExpanded(_ expanded: Bool) { button.setLinkText(expanded ? "隐藏其余银行金价" : "显示其余银行金价") }
+}
+
 extension AppDelegate {
     func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let image = NSImage(systemSymbolName: "square.stack.3d.up.fill", accessibilityDescription: "JDGold")
-        image?.isTemplate = true; image?.size = NSSize(width: 16, height: 16)
-        statusItem.button?.image = image; statusItem.button?.imagePosition = .imageLeading
+        // 阶段五：不再使用系统图标，状态栏统一以 🧱 开头。
+        statusItem.button?.image = nil
         statusItem.button?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    }
+    // 国内组默认只显示「显示品种」选中的那家银行；选中非银行品种时由纯函数回退到工商银行。
+    private var defaultDomesticBank: Instrument { MenuBankPresentation.primary(model.statusInstrument) }
+    private func menuInstruments(_ group: Instrument.Group) -> [Instrument] {
+        guard group == .domestic else { return Instrument.allCases.filter { $0.group == group } }
+        return MenuBankPresentation.domesticOrder(primary: defaultDomesticBank)
     }
     func setupMenu() {
         let menu = NSMenu(); menu.autoenablesItems = false; menu.delegate = self
+        extraBankItems = []; showOtherBanksItem = nil
+        let primary = defaultDomesticBank
         for (heading, group) in [("国内积存金", Instrument.Group.domestic), ("国际金价", .international), ("参考指标", .index)] {
             let header = NSMenuItem(title: heading, action: nil, keyEquivalent: ""); header.isEnabled = false
             menu.addItem(header)
-            for instrument in Instrument.allCases where instrument.group == group {
-                let row = QuoteMenuRow(frame: NSRect(x: 0, y: 0, width: 384, height: instrument.group == .domestic ? 96 : 80))
+            var primaryItem: NSMenuItem?
+            for instrument in menuInstruments(group) {
+                let row = QuoteMenuRow(frame: NSRect(x: 0, y: 0, width: 384, height: group == .domestic ? 96 : 80))
                 quoteRows[instrument] = row
-                let item = NSMenuItem(title: instrument.displayName, action: nil, keyEquivalent: ""); item.view = row; menu.addItem(item)
+                let item = NSMenuItem(title: instrument.displayName, action: nil, keyEquivalent: "")
+                item.view = row; menu.addItem(item)
+                if group == .domestic && instrument == primary { primaryItem = item }
+                if group == .domestic && instrument != primary { extraBankItems.append(item) }
+            }
+            if group == .domestic, let anchor = primaryItem {
+                let row = ShowOtherBanksRow(frame: NSRect(x: 0, y: 0, width: 384, height: 24))
+                row.onToggle = { [weak self] in
+                    guard let self = self else { return }
+                    self.showOtherBanksOnce.toggle(); self.applyBankVisibility()
+                    // 菜单正处于跟踪状态时，显式 update 让隐藏/显示的菜单项立即重排。
+                    self.statusItem.menu?.update()
+                    self.updateUI()
+                }
+                showOtherBanksRow = row
+                let item = NSMenuItem(title: "显示其余银行金价", action: nil, keyEquivalent: "")
+                item.view = row; showOtherBanksItem = item
+                // 紧跟默认银行之后：默认银行 → 展开按钮 → 其余两家。
+                menu.insertItem(item, at: menu.index(of: anchor) + 1)
             }
             menu.addItem(.separator())
         }
@@ -80,7 +148,14 @@ extension AppDelegate {
         menu.addItem(actionItem("退出", #selector(quit), "q"))
         statusItem.menu = menu
         installApplicationMenu()
-        updateUI()
+        applyBankVisibility(); updateUI()
+    }
+    // 两套逻辑：偏好设置常显示；展开按钮只作用于本次打开的菜单。
+    func applyBankVisibility() {
+        let visible = model.alwaysShowAllBanks || showOtherBanksOnce
+        for item in extraBankItems { item.isHidden = !visible }
+        showOtherBanksItem?.isHidden = model.alwaysShowAllBanks
+        showOtherBanksRow?.setExpanded(showOtherBanksOnce)
     }
     private func actionItem(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self
@@ -101,14 +176,16 @@ extension AppDelegate {
         windowItem.submenu = windowMenu; main.addItem(windowItem); NSApplication.shared.mainMenu = main
     }
     func menuWillOpen(_ menu: NSMenu) {
+        guard menu === statusItem.menu else { return }
+        // 关闭后再次打开恢复默认：只显示「显示品种」选中的那家银行。
+        showOtherBanksOnce = false; applyBankVisibility()
         model.now = Date(); updateUI(); floatingMenuItem?.submenu = floatingController.makeMenu()
         systemNotificationService.refreshStatus(model); LoginItemService.refresh(model)
     }
     func updateUI() {
         let now = Date(); model.now = now; model.prices = prices
         let info = prices.priceInfo(for: model.statusInstrument)
-        let prefix = model.statusInstrument == .usdIndex ? "DXY" : "Au"
-        let title = NSMutableAttributedString(string: "\(prefix) \(info.price)", attributes: [
+        let title = NSMutableAttributedString(string: "🧱 \(info.price)", attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
             .foregroundColor: MarketPresentation.isDelayed(info, now: now) ? NSColor.secondaryLabelColor : NSColor.labelColor])
         if model.showMovement {
@@ -116,10 +193,13 @@ extension AppDelegate {
                 .foregroundColor: model.colorMovement ? info.movementColor(now: now) : NSColor.secondaryLabelColor]))
         }
         statusItem.button?.attributedTitle = title; statusItem.button?.toolTip = "\(model.statusInstrument.displayName) · \(info.sourceDescription(now: now))"
+        applyBankVisibility()
         let lowest = MarketPresentation.lowestBanks(prices, now: now)
+        // 只显示一家时不声称「最低」；三家都可见才做横向比较。
+        let comparable = model.alwaysShowAllBanks || showOtherBanksOnce
         for (instrument, row) in quoteRows {
             let premium = instrument.group == .domestic ? PremiumCalculator.calculate(domestic: prices.priceInfo(for: instrument), london: prices.priceInfo(for: .london), rate: exchangeRate, now: now) : nil
-            row.update(instrument: instrument, info: prices.priceInfo(for: instrument), lowest: lowest.contains(instrument),
+            row.update(instrument: instrument, info: prices.priceInfo(for: instrument), lowest: comparable && lowest.contains(instrument),
                        premium: premium, samples: todayHistory.samples(for: instrument, now: now), now: now)
         }
         rulesMenuItem?.title = "预警规则（\(model.activeRuleCount) 条生效中）"

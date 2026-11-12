@@ -18,6 +18,22 @@ public enum BarkLinkError: Error, CustomStringConvertible {
     }
 }
 public enum BarkLinkParser {
+    // 本程序发出的所有推送都归到 Bark 的「Gold Monitor」分组；空格按 URL 规则编码。
+    public static let notificationGroup = "Gold Monitor"
+    public static let notificationGroupQuery = "group=Gold%20Monitor"
+
+    // 保留用户链接里的原有参数（level/call 等），去掉任何已有 group，再强制加上本程序分组。
+    // 纯函数，不改动持久化的原始 query。
+    public static func groupedQuery(_ raw: String?) -> String {
+        var kept: [String] = []
+        for part in (raw ?? "").split(separator: "&", omittingEmptySubsequences: true) {
+            let name = part.split(separator: "=", maxSplits: 1).first.map { String($0).lowercased() } ?? ""
+            if name != "group" { kept.append(String(part)) }
+        }
+        kept.append(notificationGroupQuery)
+        return kept.joined(separator: "&")
+    }
+
     public static func parse(_ raw: String) throws -> BarkLink {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         var key = text; var query: String?; var items: [URLQueryItem] = []

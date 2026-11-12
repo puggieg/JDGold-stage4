@@ -23,6 +23,35 @@ import Cocoa
                 Button { draft = RuleDraft(instrument: filter ?? .minsheng) } label: { Label("添加规则", systemImage: "plus") }
                     .disabled(model.alertStore == nil)
             }
+            SettingsCard("今日新高 / 新低提醒") {
+                HStack(spacing: 24) {
+                    Toggle("创新高时提醒", isOn: $model.extremeHighEnabled)
+                    Toggle("创新低时提醒", isOn: $model.extremeLowEnabled)
+                    Spacer()
+                }
+                DisclosureGroup("提醒频率与监控品种") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("冷静期", selection: $model.extremeCooldownMinutes) {
+                            ForEach([3.0,5,10,15], id: \.self) { Text("\(Int($0)) 分钟").tag($0) }
+                        }.frame(maxWidth: 320)
+                        Picker("最小变动幅度", selection: $model.extremeThresholdPercent) {
+                            ForEach([0.05,0.1,0.3,0.5], id: \.self) { Text(String(format: "%.2g%%", $0)).tag($0) }
+                        }.frame(maxWidth: 320)
+                        Text("监控品种（可多选）").font(.caption).foregroundColor(.secondary)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), alignment: .leading) {
+                            ForEach(Instrument.allCases, id: \.self) { instrument in
+                                Toggle(instrument.displayName, isOn: Binding(get: { model.extremeInstruments.contains(instrument) },
+                                                                              set: { _ in model.toggleExtremeInstrument(instrument) }))
+                            }
+                        }
+                        Text("首次破纪录立即提醒；之后冷静期内只累计，期满合并一条「刷新次数 / 累计幅度 / 最新价」。新高与新低分别开关、分别计时，跨北京时间零点重置。提醒沿用免打扰、系统通知与 Bark。")
+                            .font(.caption).foregroundColor(.secondary)
+                    }.padding(.top, 8)
+                }
+                Text("口径同「采集高 / 采集低」：本机今天采到的分钟报价极值，不含启动前或断网休眠时段。悬停可看完整口径。")
+                    .font(.caption).foregroundColor(.secondary)
+                    .help(TodayHistoryPresentation.rangeExplanation)
+            }
             HStack { Text("\(model.activeRuleCount) 条生效中"); Spacer(); Text("穿越提醒需先回撤到目标价外 0.1% 再激活") }
                 .font(.caption).foregroundColor(.secondary)
             ScrollView {

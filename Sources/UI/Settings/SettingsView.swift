@@ -44,6 +44,10 @@ struct SettingsCard<Content: View>: View {
                     }
                     Toggle("显示涨跌幅", isOn: $model.showMovement)
                     Toggle("涨跌幅着色（涨红、跌绿）", isOn: $model.colorMovement)
+                    Divider()
+                    Toggle("菜单栏常显示其余银行金价", isOn: $model.alwaysShowAllBanks)
+                    Text("菜单栏「国内积存金」默认只显示上方「显示品种」选中的那家银行（选中国际品种或美元指数时回退到工商银行），展开按钮就放在它下方。关闭此开关时，点「显示其余银行金价」只临时查看另外两家；关掉菜单再打开会恢复只显示默认那家。开启后三家常显示。")
+                        .font(.caption).foregroundColor(.secondary)
                 }
                 SettingsCard("悬浮窗") {
                     Toggle("显示悬浮窗", isOn: $model.floatingVisible)

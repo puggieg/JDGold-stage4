@@ -14,7 +14,7 @@ import Cocoa
     private let flash = NSView()
     private let premiumLabel = NSTextField(labelWithString: "")
     private let sparkline = TodaySparklineView(frame: .zero)
-    private let rangeLabel = NSTextField(wrappingLabelWithString: "")
+    private let range = TodayRangeView(frame: .zero)
     private var showHistory = true
     private var isDomestic = false
     private var lastPrice: Double?
@@ -26,11 +26,9 @@ import Cocoa
         price.font = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold); price.alignment = .right
         badge.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium); badge.alignment = .center
         badge.wantsLayer = true; badge.layer?.cornerRadius = 8
-        for field in [name,price,badge,premiumLabel,rangeLabel] { addSubview(field) }
+        for field in [name,price,badge,premiumLabel] { addSubview(field) }
         premiumLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular); premiumLabel.textColor = .secondaryLabelColor
-        rangeLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular); rangeLabel.textColor = .secondaryLabelColor
-        rangeLabel.maximumNumberOfLines = 2; rangeLabel.alignment = .right
-        addSubview(sparkline)
+        addSubview(sparkline); addSubview(range)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
@@ -40,15 +38,14 @@ import Cocoa
         badge.frame = NSRect(x: 216, y: bounds.height - 24, width: max(72, bounds.width - 224), height: 16)
         premiumLabel.frame = NSRect(x: 8, y: bounds.height - 44, width: bounds.width - 16, height: 16)
         sparkline.frame = NSRect(x: 8, y: 4, width: 176, height: 24)
-        rangeLabel.frame = NSRect(x: 208, y: 4, width: max(120, bounds.width - 216), height: 24)
+        range.frame = NSRect(x: 208, y: 2, width: max(120, bounds.width - 216), height: 28)
     }
     func update(instrument: Instrument, info: PriceInfo, premium: DomesticPremium?, samples: [MinutePriceSample], showHistory: Bool, now: Date) {
         self.showHistory = showHistory; isDomestic = instrument.group == .domestic
         premiumLabel.stringValue = premium?.displayText ?? ""; premiumLabel.isHidden = premium == nil
         premiumLabel.toolTip = TodayHistoryPresentation.premiumTooltip(premium)
-        sparkline.isHidden = !showHistory; rangeLabel.isHidden = !showHistory
-        rangeLabel.stringValue = TodayHistoryPresentation.rangeText(samples)
-        rangeLabel.toolTip = "高低为今日已采集报价，不包含启动前或缺失时段。"
+        sparkline.isHidden = !showHistory; range.isHidden = !showHistory
+        range.update(samples: samples)
         name.stringValue = instrument.displayName; price.stringValue = info.price
         let delayed = MarketPresentation.isDelayed(info, now: now)
         price.textColor = delayed ? .secondaryLabelColor : .labelColor

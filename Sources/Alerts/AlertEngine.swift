@@ -89,6 +89,12 @@ public enum AlertEngine {
         route(event, state: &next, now: now, events: &events)
         return (events, next)
     }
+    // 阶段五：新高/新低引擎复用同一套免打扰路由，避免两处规则不一致。
+    public static func routeAll(_ events: [AlertEvent], state: inout AlertState, now: Date) -> [AlertEvent] {
+        var routed: [AlertEvent] = []
+        for event in events { route(event, state: &state, now: now, events: &routed) }
+        return routed
+    }
     private static func route(_ event: AlertEvent, state: inout AlertState, now: Date, events: inout [AlertEvent]) {
         var event = event
         if state.quietHours.contains(now) {

@@ -8,6 +8,14 @@ import Cocoa
     var quoteRows: [Instrument: QuoteMenuRow] = [:]
     var rulesMenuItem: NSMenuItem?
     var floatingMenuItem: NSMenuItem?
+    // 阶段五：菜单栏其余两家银行的单次展开状态与对应菜单项。
+    var showOtherBanksOnce = false
+    var extraBankItems: [NSMenuItem] = []
+    var showOtherBanksItem: NSMenuItem?
+    var showOtherBanksRow: ShowOtherBanksRow?
+    // 新高/新低冷静期状态与持久化，独立于原有预警规则 JSON。
+    var extremeState = ExtremeAlertState()
+    lazy var extremeStore = ExtremeAlertStore(defaults: model.defaults)
     var prices = GoldPrices()
     var exchangeRate: ExchangeRate?
     var todayHistory = TodayPriceHistory(day: MarketDay.key(Date()))
@@ -42,6 +50,7 @@ import Cocoa
             catch { appLog("规则存储", "汇总读取失败：\(error)") }
             for id in store.consumedOnceRules() { var runtime = RuleRuntime(); runtime.hasFired = true; engineState.rules[id] = runtime }
         }
+        extremeState = extremeStore.load()
         configureEngine(); barkQuery = model.defaults.string(forKey: "userBarkQuery")
         bindSettings()
         // FIX(B4): 防止 App Nap，不禁止系统空闲睡眠。
@@ -63,7 +72,15 @@ import Cocoa
     private func bindSettings() {
         model.onIntervalChange = { [weak self] in self?.startRefreshing() }
         model.onAppearanceChange = { [weak self] in self?.updateUI() }
+        // 「显示品种」改了就重建菜单：国内组默认那家、其余两家和展开按钮位置都要跟着变。
+        model.onMenuBankChange = { [weak self] in
+            guard let self = self else { return }
+            self.showOtherBanksOnce = false
+            self.setupMenu()
+        }
         model.onNotificationChange = { [weak self] in guard let self = self else { return }; self.systemNotificationService.refreshStatus(self.model) }
+        // 开关、品种或频率变化后立即重算，并让引擎清掉已关闭方向的冷静期。
+        model.onExtremeConfigChange = { [weak self] in self?.checkPricesForAlert() }
         model.onRulesChanged = { [weak self] ids in
             guard let self = self else { return }
             for id in ids { self.engineState.reset(ruleID: id) }
@@ -88,7 +105,8 @@ import Cocoa
                 self.acceptEngineResult(AlertEngine.evaluateMessage(event, state: self.engineState, now: Date()))
                 return "当前为免打扰时段，测试已记录，结束后随汇总推送。"
             }
-            return await self.barkService.send(key: key, query: self.barkQuery, title: "JDGold 测试", body: "手机推送已连接 / ? # &")
+            return await self.barkService.send(key: key, query: self.barkQuery, title: "JDGold 测试",
+                                               body: self.alertTimeLine(Date()) + "手机推送已连接 / ? # &")
         }
         model.onCheckUpdate = { [weak self] in Task { await self?.performUpdateCheck() } }
     }
@@ -123,7 +141,16 @@ import Cocoa
     func checkPricesForAlert() {
         // 等钥匙串读取完成再消费规则，避免首次突破时漏掉手机推送。
         guard !terminationSavePending, credentialsReady, let store = model.alertStore else { return }
-        configureEngine(); acceptEngineResult(AlertEngine.evaluate(price: prices, rules: store.rules, state: engineState, now: Date()))
+        configureEngine()
+        let now = Date()
+        let rules = AlertEngine.evaluate(price: prices, rules: store.rules, state: engineState, now: now)
+        var combined = rules.newState
+        var events = rules.events
+        // 新高/新低与旧规则共用一次状态提交、同一套免打扰汇总和通知分发。
+        let extremes = ExtremeAlertEngine.evaluate(price: prices, history: todayHistory,
+                                                   config: model.extremeAlertConfig, state: extremeState, now: now)
+        events += AlertEngine.routeAll(extremes.events, state: &combined, now: now)
+        acceptEngineResult((events, combined), extreme: extremes.newState)
     }
     func flushQuietNotificationsIfNeeded() {
         guard !terminationSavePending, credentialsReady, let store = model.alertStore else { return }
@@ -135,17 +162,21 @@ import Cocoa
         engineState.quietHours = QuietHours(enabled: model.quietEnabled, startMinute: model.quietStart,
                                            endMinute: model.quietEnd, timeZoneIdentifier: TimeZone.current.identifier)
     }
-    func acceptEngineResult(_ result: (events: [AlertEvent], newState: AlertState)) {
+    func acceptEngineResult(_ result: (events: [AlertEvent], newState: AlertState), extreme: ExtremeAlertState? = nil) {
         guard let store = model.alertStore else { return }
         do {
             // FIX(B11): 先写回顺延目标及免打扰记录，再通知用户，保证提示对应真实保存结果。
             try store.applyTargetUpdates(result.newState.targetUpdates); try store.savePending(result.newState.pending)
+            if let extreme = extreme { extremeStore.save(extreme); extremeState = extreme }
             store.saveOnceState(result.newState); engineState = result.newState; model.refreshRules()
         } catch { appLog("规则存储", "计算结果未提交：\(error)"); return }
+        // 同一批提醒共用一个触发时刻；每条都在首行带电脑本地时间，当天第一条带年份。
+        let deliveredAt = Date()
         for event in result.events {
             if event.delivery == .recordOnly { appLog("免打扰", "已记录：\(event.body)"); continue }
             // 展示层替换上游 emoji，纯引擎与持久化格式保持原样。
-            let title = cleanText(event.title), body = cleanText(event.body)
+            let title = cleanText(event.title)
+            let body = alertTimeLine(deliveredAt) + cleanText(event.body)
             systemNotificationService.deliver(title: title, body: body, preferSystem: model.systemNotifications, sound: model.soundEnabled) { [weak self] in
                 guard let self = self else { return }; self.alertWindowController.showAlert(title: title, body: body, sound: self.model.soundEnabled)
             }
@@ -153,6 +184,14 @@ import Cocoa
             if key != nil { Task { _ = await barkService.send(key: key, query: query, title: title, body: body) } }
         }
         rulesMenuItem?.title = "预警规则（\(model.activeRuleCount) 条生效中）"
+    }
+    // 每条实际发出的提醒都带一行触发时的电脑本地时间；当天只有第一条（含过 0 点后第一条）带年份。
+    // 日期状态写入偏好，重启应用也不会把当天第二条误当成第一条。
+    private func alertTimeLine(_ now: Date) -> String {
+        let defaults = model.defaults
+        let includeYear = AlertTimeStamp.includesYear(lastDay: defaults.string(forKey: AlertTimeStamp.lastDayKey), now: now)
+        if includeYear { defaults.set(AlertTimeStamp.day(now), forKey: AlertTimeStamp.lastDayKey) }
+        return AlertTimeStamp.text(now, includeYear: includeYear) + "\n"
     }
     private func cleanText(_ text: String) -> String {
         text.replacingOccurrences(of: "📈", with: "▲").replacingOccurrences(of: "📉", with: "▼")

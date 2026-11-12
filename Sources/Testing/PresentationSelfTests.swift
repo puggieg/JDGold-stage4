@@ -75,6 +75,13 @@ public enum PresentationSelfTests {
             var rejected = false; do { _ = try BarkLinkParser.parse(invalid) } catch { rejected = true }
             try check(rejected, "应拒绝链接：\(invalid)")
         }
+        // 所有推送统一归到 Gold Monitor 分组，且不能出现重复的 group 参数。
+        try check(BarkLinkParser.notificationGroup == "Gold Monitor", "分组名称")
+        try check(BarkLinkParser.groupedQuery(nil) == "group=Gold%20Monitor", "无参数时也归组")
+        try check(BarkLinkParser.groupedQuery("") == "group=Gold%20Monitor", "空参数也归组")
+        try check(BarkLinkParser.groupedQuery("level=critical&call=1") == "level=critical&call=1&group=Gold%20Monitor", "保留原参数")
+        try check(BarkLinkParser.groupedQuery("group=Other&level=active&GROUP=Foo") == "level=active&group=Gold%20Monitor", "覆盖已有 group 且不重复")
+        try check(URLComponents(string: "https://api.day.app/Key/x/y?\(BarkLinkParser.groupedQuery(nil))")?.queryItems?.first?.value == "Gold Monitor", "分组值可正确解码")
     }
     private static func screens() throws {
         let left = PanelScreen(id: "left", frame: PanelFrame(x: -1920, y: 0, width: 1920, height: 1080))
